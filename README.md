@@ -1,33 +1,3 @@
-# **Package Naming Explanation**
-
-## **ol-zarr vs @openlayers/zarr-tile**
-
-### **ol-zarr (Recommended for you)**
-- ✅ **You own it** - matches your GitHub repo `nyinyinyanlin/ol-zarr`
-- ✅ **Simple name** - easy to remember and type
-- ✅ **Immediate publishing** - no permissions needed
-- ✅ **Community pattern** - follows other OpenLayers extensions (ol-ext, ol-geocoder, etc.)
-- ✅ **Clear branding** - indicates OpenLayers + Zarr integration
-
-### **@openlayers/zarr-tile (Not recommended)**
-- ❌ **Not yours** - @openlayers namespace is owned by OpenLayers organization
-- ❌ **Requires permission** - would need approval from OpenLayers maintainers
-- ❌ **More complex** - scoped package setup
-- ⚠️ **Risk of rejection** - they might prefer to manage their own official extensions
-
-## **Recommendation: Use `ol-zarr`**
-
-Stick with `ol-zarr` because:
-1. **It matches your repository name**
-2. **You have full control**
-3. **It's immediately available**
-4. **Clear and professional naming**
-
----
-
-# **README.md for ol-zarr**
-
-```markdown
 # ol-zarr
 
 ![npm version](https://img.shields.io/npm/v/ol-zarr.svg)
@@ -344,5 +314,4 @@ Made with ❤️ for the geospatial community
   "bugs": {
     "url": "https://github.com/nyinyinyanlin/ol-zarr/issues"
   }
-}
-```
+}```
