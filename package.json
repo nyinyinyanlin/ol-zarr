@@ -21,11 +21,13 @@
   ],
   "scripts": {
     "build": "webpack --mode=production",
+    "build:analyze": "webpack --mode=production --analyze",
     "dev": "webpack --mode=development --watch",
     "clean": "rm -rf dist/",
     "test": "npm run build && npm run test:examples",
     "test:examples": "echo 'Open examples/basic.html in browser to test'",
-    "prepublishOnly": "npm run clean && npm run build"
+    "prepublishOnly": "npm run clean && npm run build",
+    "size-check": "npm run build && echo 'Build sizes:' && ls -lh dist/"
   },
   "keywords": [
     "openlayers",
