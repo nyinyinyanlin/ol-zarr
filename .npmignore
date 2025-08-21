@@ -1,0 +1,19 @@
+# Source files (only ship dist)
+src/
+examples/
+docs/
+
+# Development files
+webpack.config.js
+.babelrc
+.gitignore
+
+# Dependencies
+node_modules/
+
+# Logs
+*.log
+
+# IDE files
+.vscode/
+.idea/

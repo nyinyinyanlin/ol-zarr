@@ -1,0 +1,60 @@
+{
+  "name": "@openlayers/zarr-tile",
+  "version": "1.0.0",
+  "description": "OpenLayers extension for visualizing Zarr-based geospatial data as map tiles",
+  "main": "dist/index.cjs.js",
+  "module": "dist/index.esm.js",
+  "unpkg": "dist/index.umd.js",
+  "jsdelivr": "dist/index.umd.js",
+  "exports": {
+    ".": {
+      "import": "./dist/index.esm.js",
+      "require": "./dist/index.cjs.js",
+      "unpkg": "./dist/index.umd.js"
+    },
+    "./worker": "./dist/zarr-worker.js"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "webpack --mode=production",
+    "dev": "webpack --mode=development --watch",
+    "clean": "rm -rf dist/",
+    "test": "npm run build && npm run test:examples",
+    "test:examples": "echo 'Open examples/basic.html in browser to test'",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "keywords": [
+    "openlayers",
+    "zarr",
+    "geospatial",
+    "tiles",
+    "earth-observation",
+    "remote-sensing",
+    "webgl"
+  ],
+  "author": "Nyi Nyi Nyan Lin <nyinyinyan.lin@plus.ac.at>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nyinyinyanlin/ol-zarr.git"
+  },
+  "homepage": "https://github.com/nyinyinyanlin/ol-zarr#readme",
+  "peerDependencies": {
+    "ol": "^10.0.0"
+  },
+  "dependencies": {
+    "zarr": "^0.6.3"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.23.0",
+    "@babel/preset-env": "^7.23.0",
+    "babel-loader": "^9.1.0",
+    "webpack": "^5.89.0",
+    "webpack-cli": "^5.1.0",
+    "copy-webpack-plugin": "^11.0.0"
+  }
+}
