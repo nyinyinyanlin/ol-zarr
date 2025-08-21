@@ -293,25 +293,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ---
 
 Made with ❤️ for the geospatial community
-```
-
-## **🔧 Update Your package.json**
-
-```json
-{
-  "name": "ol-zarr",
-  "version": "1.0.0",
-  "description": "OpenLayers extension for visualizing Zarr-based geospatial data as map tiles",
-  "main": "dist/index.cjs.js",
-  "module": "dist/index.esm.js",
-  "unpkg": "dist/index.umd.js",
-  "jsdelivr": "dist/index.umd.js",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/nyinyinyanlin/ol-zarr.git"
-  },
-  "homepage": "https://github.com/nyinyinyanlin/ol-zarr#readme",
-  "bugs": {
-    "url": "https://github.com/nyinyinyanlin/ol-zarr/issues"
-  }
-}```
