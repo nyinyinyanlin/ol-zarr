@@ -1,13 +1,13 @@
-// src/ZarrTile.js
 import DataTile from 'ol/source/DataTile';
 import TileGrid from 'ol/tilegrid/TileGrid';
-import { openArray } from 'zarr';
+import { slice, openArray } from "zarr";
 
 /**
  * @typedef {Object} ZarrTileOptions
- * @property {Object} metadata Dataset metadata containing extent, zoomLevels, resolutions, etc.
- * @property {number} [bandIndex=0] Initial band index to display.
- * @property {number} [timeIndex=0] Initial time index to display.
+ * @property {string} url URL to the Zarr dataset.
+ * @property {Object} metadata Dataset metadata containing extent, zoomLevels, resolutions, tileSizes.
+ * @property {number} [bandIndex=0] Band index to display.
+ * @property {number} [timeIndex=0] Time index to display.
  * @property {number} [transition=0] Fade duration when updating tiles.
  * @property {boolean} [interpolate=true] Use interpolation when resampling.
  * @property {boolean} [wrapX=false] Whether to wrap around the antimeridian.
@@ -19,185 +19,296 @@ import { openArray } from 'zarr';
  */
 class ZarrTile extends DataTile {
   /**
-   * Generate full resolution array for all zoom levels, filling gaps with interpolated values.
+   * Fill arrays for full zoom level range
+   * @param {Array<number>} tileSizes Original tile sizes for supported levels
    * @param {Array<number>} resolutions Original resolutions for supported levels
    * @param {Array<number>} zoomLevels Supported zoom levels
-   * @return {Array<number>} Full resolutions array for all zoom levels
+   * @return {Object} Full arrays for all zoom levels
    * @private
    */
-  static _generateFullArrays(resolutions, zoomLevels) {
+  static _generateFullArrays(/*tileSizes,*/ resolutions, zoomLevels) {
     const maxZoom = Math.max(...zoomLevels);
     const minZoom = Math.min(...zoomLevels);
+
+    // const fullTileSizes = new Array(maxZoom + 1);
     const fullResolutions = new Array(maxZoom + 1);
-    
+
     // Small increment for unique resolutions
     const INCREMENT = 0.001;
 
     // Fill supported levels first
     zoomLevels.forEach((z, index) => {
+      // fullTileSizes[z] = tileSizes[index];
       fullResolutions[z] = resolutions[index];
     });
 
     // Fill gaps and unsupported levels
     for (let z = 0; z <= maxZoom; z++) {
-      if (fullResolutions[z] === undefined) {
+      if (!fullResolutions[z]) {
+        // Find nearest supported level for reference
+        let nearestSupportedLevel;
+        let nearestIndex;
+
         if (z < minZoom) {
-          // Below minimum supported level - use first supported level with increment
+          // Below minimum supported level - use first supported level
+          nearestSupportedLevel = minZoom;
+          nearestIndex = 0;
+          // Add increment to resolution for unique values
           fullResolutions[z] = resolutions[0] + ((minZoom - z) * INCREMENT);
         } else {
-          // Find next supported level for interpolation
-          let nextSupportedIndex = -1;
+          // Find next supported level
           for (let i = 0; i < zoomLevels.length; i++) {
             if (zoomLevels[i] > z) {
-              nextSupportedIndex = i;
+              nearestSupportedLevel = zoomLevels[i];
+              nearestIndex = i;
               break;
             }
           }
-          
-          if (nextSupportedIndex === -1) {
-            // Use last supported level
-            fullResolutions[z] = resolutions[resolutions.length - 1];
+          // If no next level found, use last supported level
+          if (!nearestSupportedLevel) {
+            nearestSupportedLevel = zoomLevels[zoomLevels.length - 1];
+            nearestIndex = zoomLevels.length - 1;
+          }
+          // Calculate resolution for gap level
+          const prevLevel = zoomLevels[nearestIndex - 1];
+          const nextLevel = zoomLevels[nearestIndex];
+          if (prevLevel && nextLevel) {
+            // Interpolate resolution with small increment
+            const ratio = (z - prevLevel) / (nextLevel - prevLevel);
+            const baseResolution = resolutions[nearestIndex - 1] +
+              (resolutions[nearestIndex] - resolutions[nearestIndex - 1]) * ratio;
+            fullResolutions[z] = baseResolution + (INCREMENT * (z - prevLevel));
           } else {
-            // Interpolate between previous and next supported levels
-            const prevIndex = nextSupportedIndex - 1;
-            if (prevIndex >= 0) {
-              const prevLevel = zoomLevels[prevIndex];
-              const nextLevel = zoomLevels[nextSupportedIndex];
-              const ratio = (z - prevLevel) / (nextLevel - prevLevel);
-              const baseResolution = resolutions[prevIndex] + 
-                (resolutions[nextSupportedIndex] - resolutions[prevIndex]) * ratio;
-              fullResolutions[z] = baseResolution + (INCREMENT * (z - prevLevel));
-            } else {
-              fullResolutions[z] = resolutions[nextSupportedIndex];
-            }
+            fullResolutions[z] = resolutions[nearestIndex];
           }
         }
+
+        // Use the reference level's values for shapes and tile sizes
+        // fullTileSizes[z] = tileSizes[nearestIndex];
       }
     }
 
-    // Ensure first resolution is unique for OpenLayers
-    fullResolutions[0] = fullResolutions[0] + 0.5;
-
-    return fullResolutions;
+    return {
+      // tileSizes: fullTileSizes,
+      resolutions: fullResolutions,
+    };
   }
 
   /**
    * @param {ZarrTileOptions} options ZarrTile options.
    */
   constructor(options) {
-    // Validate required options
-    if (!options?.metadata) {
-      throw new Error('Metadata is required for ZarrTile source');
-    }
     if (!options.metadata.url) {
-      throw new Error('URL is required in ZarrTile metadata');
+      throw new Error('URL is required for ZarrTile source');
+    }
+    if (!options.metadata) {
+      throw new Error('Metadata is required for ZarrTile source');
     }
 
     const {
       extent,
       zoomLevels,
       resolutions,
+      // tileSizes,
       crs,
+      bandSize,
       bandIndices,
       currentTime,
-      nodata,
-      path = '',
-      arrayPaths = { value: 'value', time: 'time', statistics: 'statistics' }
+      nodata
     } = options.metadata;
+    // Generate full arrays for all zoom levels
 
-    // Validate required metadata
-    if (!extent || !zoomLevels || !resolutions || !crs) {
-      throw new Error('Missing required metadata: extent, zoomLevels, resolutions, and crs are required');
-    }
+    const {
+      // tileSizes: fullTileSizes,
+      resolutions: fullResolutions
+    } = ZarrTile._generateFullArrays(/*tileSizes, */ resolutions, zoomLevels);
 
-    // Generate full resolutions array
-    const fullResolutions = ZarrTile._generateFullArrays(resolutions, zoomLevels);
+    fullResolutions[0] = fullResolutions[0] + 0.5;
+
+
+    // const fullResolutions = resolutions
 
     // Create tile grid
     const tileGrid = new TileGrid({
       extent: extent,
       resolutions: fullResolutions,
-      minZoom: Math.min(...zoomLevels),
-      maxZoom: Math.max(...zoomLevels)
+      // tileSizes: fullTileSizes.map(size => [size, size])
+      minZoom: zoomLevels[0],
+      maxZoom: zoomLevels[zoomLevels.length - 1]
     });
 
-    // Initialize parent DataTile
+    // Initialize parent
     super({
       projection: crs,
       tileGrid: tileGrid,
       interpolate: options.interpolate !== undefined ? options.interpolate : true,
       transition: options.transition || 0,
       wrapX: options.wrapX !== undefined ? options.wrapX : false,
-      loader: async (z, x, y) => await this.tileLoader(z, x, y)
+      loader: async (z, y, x) => await this.tileLoader(z, y, x)
     });
 
-    // Initialize instance properties
-    this.url_ = this._normalizeUrl(options.metadata.url);
-    this.path_ = path;
-    this.arrayPaths_ = arrayPaths;
-    this.metadata_ = options.metadata;
-    this.bandIndices_ = bandIndices || [0];
+    this.url_ = this.normalizeUrl_(options.metadata.url);
     this.bandIndex_ = options.bandIndex || 0;
+    this.metadata_ = options.metadata;
     this.timestamps_ = options.metadata.timestamps || [];
     this.statistics_ = options.metadata.statistics || [];
-    this.nodata_ = nodata;
-    this.usePercentiles_ = options.metadata.usePercentiles !== undefined ? 
-      options.metadata.usePercentiles : true;
+    this.currentTimeIndex_ = options.metadata.currentTime ? this.getIndexAtTime(options.metadata.currentTime) : 0;// this.timestamps_.length > 0 ? this.timestamps_.length - 1 : 0;
+    this.bandSize_ = bandSize ? bandSize : 1;
+    this.bandIndices_ = bandIndices ? bandIndices : [0];
+    this.usePercentiles = options.metadata.usePercentiles;
+    this.addChangeListener('time', (e) => {
+      this.refresh();
+    }
+    );
+    this.addChangeListener('bands', (e) => {
+      this.refresh();
+    });
+    this.set("time", this.timestamps_[this.currentTimeIndex_]);
+    this.set("bands", this.bandIndices_);
+  }
 
-    // Initialize time index
-    this.currentTimeIndex_ = 0;
-    if (currentTime && this.timestamps_.length > 0) {
-      this.currentTimeIndex_ = this._findClosestTimestampIndex(currentTime);
-    } else if (options.timeIndex !== undefined) {
-      this.currentTimeIndex_ = Math.max(0, Math.min(options.timeIndex, this.timestamps_.length - 1));
+  async retrieveTimestamps() {
+    const timestamps = [];
+    try {
+      const timeArray = await openArray({
+        store: this.metadata_.url,
+        path: `${this.metadata_.path}/${this.metadata_.zoomLevels[this.metadata_.zoomLevels.length - 1]}/time`,
+        mode: "r"
+      });
+      const ts = await timeArray.get([null])
+      ts.data.forEach(element => {
+        timestamps.push(new Date(element * 1000));
+      })
+    } catch (error) {
+      console.error(error);
+    }
+    this.timestamps_ = timestamps;
+  }
+
+  async retrieveStatistics() {
+    if (this.metadata_.statistics) return;
+    const statistics = [];
+    try {
+      const statsArray = await openArray({
+        store: this.metadata_.url,
+        path: `${this.metadata_.path}/${this.metadata_.zoomLevels[this.metadata_.zoomLevels.length - 1]}/statistics`,
+        mode: "r"
+      });
+      const stats = await statsArray.get([null, this.bandIndex_, null])
+      stats.data.forEach(element => {
+        statistics.push({
+          min: element[0],
+          max: element[1],
+          mean: element[2],
+          p2: element[3],
+          p98: element[4],
+          mode: element[5],
+          std: element[6],
+        });
+      })
+
+    } catch (error) {
+      console.error(error);
+    }
+    this.statistics_ = statistics;
+  }
+
+  getCurrentStatistics() {
+    return this.statistics_[this.currentTimeIndex_];
+  }
+
+  findClosestTimestampIndex_(targetTimestamp) {
+    if (this.timestamps_.length === 0) return 0;
+
+    let closestIndex = 0;
+    let minDiff = Math.abs(this.timestamps_[0] - targetTimestamp);
+
+    for (let i = 1; i < this.timestamps_.length; i++) {
+      const diff = Math.abs(this.timestamps_[i] - targetTimestamp);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closestIndex = i;
+      }
     }
 
-    // Set up change listeners
-    this.addChangeListener('time', () => this.refresh());
-    this.addChangeListener('bands', () => this.refresh());
+    return closestIndex;
+  }
 
-    // Set initial property values
-    if (this.timestamps_.length > 0) {
-      this.set('time', this.timestamps_[this.currentTimeIndex_]);
+  getTimeRangeIndices(startDate, endDate) {
+    const startTimestamp = startDate.getTime();
+    const endTimestamp = endDate.getTime();
+
+    let startIndex = -1;
+    let endIndex = -1;
+
+    for (let i = 0; i < this.timestamps_.length; i++) {
+      const dateTimestamp = this.timestamps_[i].getTime();
+
+      // Find the first date within the range (start index)
+      if (startIndex === -1 && dateTimestamp >= startTimestamp) {
+        startIndex = i;
+      }
+
+      // Find the last date within the range (end index)
+      if (dateTimestamp > endTimestamp) {
+        endIndex = i - 1;
+      } else if (dateTimestamp === endTimestamp) {
+        endIndex = i;
+      }
+
+      // If both indices are found, break out early
+      if (startIndex !== -1 && endIndex !== -1) {
+        break;
+      }
     }
-    this.set('bands', this.bandIndices_);
+
+    if (startIndex === -1) startIndex=0;
+    if (endIndex === -1) endIndex=this.timestamps_.length - 1; 
+
+    return { startIndex: startIndex, endIndex: endIndex };
   }
 
-  /**
-   * Normalize URL by removing trailing slashes
-   * @param {string} url The URL to normalize
-   * @return {string} Normalized URL
-   * @private
-   */
-  _normalizeUrl(url) {
-    return url.replace(/\/+$/, '');
+  getTimestamps() { return this.timestamps_; }
+  getTimeAtIndex(index) { return this.timestamps_[index]; }
+  getIndexAtTime(time) { return this.findClosestTimestampIndex_(time); }
+  setCurrentTime(time) { this.setCurrentTimeIndex(this.findClosestTimestampIndex_(time)); }
+  setCurrentTimeIndex(index) { this.currentTimeIndex_ = index; this.set("time", this.getTimeAtIndex(this.currentTimeIndex_), false); }
+  getCurrentTimeIndex() { return this.currentTimeIndex_; }
+  getIndicesFromCoord(coord) {
+    const resolution = this.metadata_.resolutions[this.metadata_.resolutions.length - 1];
+    const xmin = coord[0] < this.metadata_.extent[0] ? this.metadata_.extent[0] : coord[0] > this.metadata_.extent[2] ? this.metadata_.extent[2] : coord[0];
+    const ymin = coord[1] < this.metadata_.extent[1] ? this.metadata_.extent[1] : coord[1] > this.metadata_.extent[3] ? this.metadata_.extent[3] : coord[1];
+    const x = Math.floor((xmin - this.metadata_.extent[0]) / resolution);
+    const y = Math.floor((this.metadata_.extent[3] - ymin) / resolution);
+    return [x, y];
   }
-
-  /**
-   * Get URL for a specific zoom level
-   * @param {number} z Zoom level
-   * @return {string} Zoom level URL
-   */
-  getZoomUrl(z) {
-    return `${this.url_}/${this.path_}/${z}`.replace(/\/+/g, '/');
+  getIndicesFromExtent(extent) {
+    const resolution = this.metadata_.resolutions[this.metadata_.resolutions.length - 1];
+    const xmin = extent[0] < this.metadata_.extent[0] ? this.metadata_.extent[0] : extent[0];
+    const xmax = extent[2] > this.metadata_.extent[2] ? this.metadata_.extent[2] : extent[2];
+    const ymin = extent[1] < this.metadata_.extent[1] ? this.metadata_.extent[1] : extent[1];
+    const ymax = extent[3] > this.metadata_.extent[3] ? this.metadata_.extent[3] : extent[3];
+    const x0 = Math.floor((xmin - this.metadata_.extent[0]) / resolution);
+    const y0 = Math.floor((this.metadata_.extent[3] - ymax) / resolution);
+    const x1 = Math.floor((xmax - this.metadata_.extent[0]) / resolution);
+    const y1 = Math.floor((this.metadata_.extent[3] - ymin) / resolution);
+    return [x0, y0, x1, y1]
   }
-
-  /**
-   * Get URL for value array at specific zoom level
-   * @param {number} z Zoom level
-   * @return {string} Value array URL
-   */
-  getValueArrayUrl(z) {
-    return `${this.getZoomUrl(z)}/${this.arrayPaths_.value}`;
+  getCoordinateAtIndex(index) {
+    const extent = this.metadata_.extent;
+    const resolution = this.metadata_.resolutions[this.metadata_.resolutions.length - 1];
+    x = (x * resolution) + extent[0];
+    y = (extent[3] - (y * resolution)) + extent[3];
+    return x, y
   }
-
-  /**
-   * Check if zoom level is supported
-   * @param {number} z Zoom level
-   * @return {boolean} True if supported
-   */
-  isZoomSupported(z) {
-    return this.metadata_.zoomLevels.includes(z);
+  getExtentFromIndices(indices) {
+    const resolution = this.metadata_.resolutions[this.metadata_.resolutions.length - 1];
+    const extent = this.metadata_.extent;
+    x0 = (x0 * resolution) + extent[0];
+    y0 = (extent[3] - (y0 * resolution)) + extent[3];
+    x1 = (x1 * resolution) + extent[0];
+    y1 = (extent[3] - (y1 * resolution)) + extent[3];
+    return [x0, y0, x1, y1];
   }
 
   /**
@@ -205,7 +316,7 @@ class ZarrTile extends DataTile {
    * @param {number} z Zoom level
    * @param {number} x Tile X coordinate
    * @param {number} y Tile Y coordinate
-   * @return {Promise<Uint8Array|Float32Array>} Tile data
+   * @return {Promise<Uint8Array>} Tile data as RGBA
    * @private
    */
   async tileLoader(z, x, y) {
@@ -215,24 +326,10 @@ class ZarrTile extends DataTile {
 
     const tileGrid = this.getTileGrid();
     const tileSize = tileGrid.getTileSize(z);
-    const tileRange = tileGrid.getFullTileRange(z);
+    const tileRange = this.getTileGrid().getFullTileRange(z);
 
     return new Promise((resolve, reject) => {
-      // Create worker with proper URL handling for different environments
-      let workerUrl;
-      try {
-        // Try to get worker from same location as main script
-        if (typeof __webpack_public_path__ !== 'undefined') {
-          workerUrl = new URL('zarr-worker.js', __webpack_public_path__);
-        } else {
-          workerUrl = new URL('./zarr-worker.js', import.meta.url);
-        }
-      } catch (e) {
-        // Fallback for older environments
-        workerUrl = 'zarr-worker.js';
-      }
-
-      const worker = new Worker(workerUrl, { type: 'module' });
+      const worker = new Worker(new URL('./zarr-worker.js', import.meta.url), { type: 'module' });
 
       worker.onmessage = (e) => {
         worker.terminate();
@@ -248,262 +345,89 @@ class ZarrTile extends DataTile {
         reject(error);
       };
 
-      // Send tile request to worker
       worker.postMessage({
         z: z,
         x: x,
         y: y,
         tileSize: tileSize,
         tileRange: tileRange,
-        bands: this.bandIndices_,
-        bandIndex: this.bandIndex_,
-        timeIndex: this.currentTimeIndex_,
-        nodata: this.nodata_,
-        normalize: this.metadata_.normalize || false,
+        nodata: this.metadata_.nodata,
+        normalize: this.metadata_.normalize ? this.metadata_.normalize : false,
         statistics: this.getCurrentStatistics(),
-        usePercentiles: this.usePercentiles_,
-        storeUrl: this.url_,
-        storePath: this.getValueArrayUrl(z)
+        usePercentiles: this.usePercentiles,
+        bands: this.metadata_.bands,
+        timeIndex: this.currentTimeIndex_,
+        storeUrl: this.metadata_.url,
+        storePath: `${this.metadata_.path}/${z}/value`
       });
     });
   }
 
-  // ==================== TEMPORAL DATA METHODS ====================
-
   /**
-   * Retrieve timestamps from Zarr store
-   * @return {Promise<void>}
-   */
-  async retrieveTimestamps() {
-    if (this.timestamps_.length > 0) return; // Already loaded
-
-    const timestamps = [];
-    try {
-      const highestZoom = Math.max(...this.metadata_.zoomLevels);
-      const timeArray = await openArray({
-        store: this.url_,
-        path: `${this.path_}/${highestZoom}/${this.arrayPaths_.time}`.replace(/\/+/g, '/'),
-        mode: 'r'
-      });
-      
-      const ts = await timeArray.get([null]);
-      ts.data.forEach(element => {
-        timestamps.push(new Date(element * 1000));
-      });
-      
-      this.timestamps_ = timestamps;
-      if (timestamps.length > 0 && this.currentTimeIndex_ >= timestamps.length) {
-        this.currentTimeIndex_ = timestamps.length - 1;
-      }
-    } catch (error) {
-      console.warn('Could not retrieve timestamps:', error.message);
-    }
-  }
-
-  /**
-   * Retrieve statistics from Zarr store
-   * @return {Promise<void>}
-   */
-  async retrieveStatistics() {
-    if (this.statistics_.length > 0) return; // Already loaded
-
-    const statistics = [];
-    try {
-      const highestZoom = Math.max(...this.metadata_.zoomLevels);
-      const statsArray = await openArray({
-        store: this.url_,
-        path: `${this.path_}/${highestZoom}/${this.arrayPaths_.statistics}`.replace(/\/+/g, '/'),
-        mode: 'r'
-      });
-      
-      const stats = await statsArray.get([null, this.bandIndex_, null]);
-      stats.data.forEach(element => {
-        statistics.push({
-          min: element[0],
-          max: element[1],
-          mean: element[2],
-          p2: element[3],
-          p98: element[4],
-          mode: element[5],
-          std: element[6]
-        });
-      });
-      
-      this.statistics_ = statistics;
-    } catch (error) {
-      console.warn('Could not retrieve statistics:', error.message);
-    }
-  }
-
-  /**
-   * Get statistics for current time index
-   * @return {Object|null} Current statistics
-   */
-  getCurrentStatistics() {
-    if (this.statistics_.length === 0) return null;
-    const index = Math.min(this.currentTimeIndex_, this.statistics_.length - 1);
-    return this.statistics_[index];
-  }
-
-  /**
-   * Find closest timestamp index for a given date
-   * @param {Date} targetTimestamp Target date
-   * @return {number} Closest timestamp index
+   * Normalize URL
+   * @param {string} url The URL
+   * @return {string} Normalized URL
    * @private
    */
-  _findClosestTimestampIndex(targetTimestamp) {
-    if (this.timestamps_.length === 0) return 0;
-
-    let closestIndex = 0;
-    let minDiff = Math.abs(this.timestamps_[0].getTime() - targetTimestamp.getTime());
-
-    for (let i = 1; i < this.timestamps_.length; i++) {
-      const diff = Math.abs(this.timestamps_[i].getTime() - targetTimestamp.getTime());
-      if (diff < minDiff) {
-        minDiff = diff;
-        closestIndex = i;
-      }
-    }
-
-    return closestIndex;
+  normalizeUrl_(url) {
+    return url.replace(/\/*$/, '');
   }
 
   /**
-   * Get index range for date range
-   * @param {Date} startDate Start date
-   * @param {Date} endDate End date
-   * @return {Object} Object with startIndex and endIndex
+   * Get URL for zoom level
+   * @param {number} z Zoom level
+   * @return {string} URL
    */
-  getTimeRangeIndices(startDate, endDate) {
-    const startTimestamp = startDate.getTime();
-    const endTimestamp = endDate.getTime();
+  getZoomUrl(z) {
+    return `${this.url_}/${z}`;
+  }
 
-    let startIndex = -1;
-    let endIndex = -1;
+  /**
+   * Get URL for value array
+   * @param {number} z Zoom level
+   * @return {string} URL
+   */
+  getValueArrayUrl(z) {
+    return `${this.getZoomUrl(z)}/value`;
+  }
 
-    for (let i = 0; i < this.timestamps_.length; i++) {
-      const dateTimestamp = this.timestamps_[i].getTime();
+  /**
+   * Check if zoom level is supported
+   * @param {number} z Zoom level
+   * @return {boolean} True if supported
+   */
+  isZoomSupported(z) {
+    return this.metadata_.zoomLevels.includes(z);
+  }
 
-      if (startIndex === -1 && dateTimestamp >= startTimestamp) {
-        startIndex = i;
-      }
-
-      if (dateTimestamp > endTimestamp) {
-        endIndex = i - 1;
-        break;
-      } else if (dateTimestamp <= endTimestamp) {
-        endIndex = i;
-      }
-    }
-
+  /**
+   * Get tile URL parameters
+   * @param {number} z Zoom level
+   * @param {number} x Tile X coordinate
+   * @param {number} y Tile Y coordinate
+   * @return {Object} URL parameters
+   */
+  getTileUrlParams(z, x, y) {
     return {
-      startIndex: startIndex === -1 ? 0 : startIndex,
-      endIndex: endIndex === -1 ? this.timestamps_.length - 1 : endIndex
+      valueArrayUrl: this.getValueArrayUrl(z),
+      supported: this.isZoomSupported(z),
+      zoomLevel: z,
+      tileCoord: [z, x, y],
+      bandIndex: this.bandIndex_,
+      timeIndex: this.currentTimeIndex_
     };
   }
 
-  // ==================== COORDINATE CONVERSION METHODS ====================
-
   /**
-   * Convert map coordinates to array indices
-   * @param {Array<number>} coord Coordinate [x, y] in map projection
-   * @return {Array<number>} Array indices [x, y]
-   */
-  getIndicesFromCoord(coord) {
-    const resolution = this.metadata_.resolutions[this.metadata_.resolutions.length - 1];
-    const extent = this.metadata_.extent;
-    
-    // Clamp coordinates to extent
-    const x = Math.max(extent[0], Math.min(coord[0], extent[2]));
-    const y = Math.max(extent[1], Math.min(coord[1], extent[3]));
-    
-    // Convert to array indices
-    const xIndex = Math.floor((x - extent[0]) / resolution);
-    const yIndex = Math.floor((extent[3] - y) / resolution);
-    
-    return [xIndex, yIndex];
-  }
-
-  /**
-   * Convert array indices to map coordinates
-   * @param {number} x Array x index
-   * @param {number} y Array y index
-   * @return {Array<number>} Map coordinates [x, y]
-   */
-  getCoordinateAtIndex(x, y) {
-    const extent = this.metadata_.extent;
-    const resolution = this.metadata_.resolutions[this.metadata_.resolutions.length - 1];
-    
-    const coordX = (x * resolution) + extent[0];
-    const coordY = extent[3] - (y * resolution);
-    
-    return [coordX, coordY];
-  }
-
-  /**
-   * Convert extent to array indices
-   * @param {Array<number>} extent Extent [xmin, ymin, xmax, ymax]
-   * @return {Array<number>} Array indices [x0, y0, x1, y1]
-   */
-  getIndicesFromExtent(extent) {
-    const resolution = this.metadata_.resolutions[this.metadata_.resolutions.length - 1];
-    const dataExtent = this.metadata_.extent;
-    
-    // Clamp to data extent
-    const xmin = Math.max(extent[0], dataExtent[0]);
-    const xmax = Math.min(extent[2], dataExtent[2]);
-    const ymin = Math.max(extent[1], dataExtent[1]);
-    const ymax = Math.min(extent[3], dataExtent[3]);
-    
-    // Convert to indices
-    const x0 = Math.floor((xmin - dataExtent[0]) / resolution);
-    const y0 = Math.floor((dataExtent[3] - ymax) / resolution);
-    const x1 = Math.floor((xmax - dataExtent[0]) / resolution);
-    const y1 = Math.floor((dataExtent[3] - ymin) / resolution);
-    
-    return [x0, y0, x1, y1];
-  }
-
-  /**
-   * Convert array indices to extent
-   * @param {number} x0 Start x index
-   * @param {number} y0 Start y index
-   * @param {number} x1 End x index
-   * @param {number} y1 End y index
-   * @return {Array<number>} Extent [xmin, ymin, xmax, ymax]
-   */
-  getExtentFromIndices(x0, y0, x1, y1) {
-    const resolution = this.metadata_.resolutions[this.metadata_.resolutions.length - 1];
-    const extent = this.metadata_.extent;
-    
-    const xmin = (x0 * resolution) + extent[0];
-    const ymax = extent[3] - (y0 * resolution);
-    const xmax = (x1 * resolution) + extent[0];
-    const ymin = extent[3] - (y1 * resolution);
-    
-    return [xmin, ymin, xmax, ymax];
-  }
-
-  // ==================== PUBLIC API METHODS ====================
-
-  /**
-   * Get base URL
-   * @return {string} Base URL
+   * Get URL
+   * @return {string} URL
    */
   getUrl() {
     return this.url_;
   }
 
   /**
-   * Get metadata
-   * @return {Object} Metadata object
-   */
-  getMetadata() {
-    return this.metadata_;
-  }
-
-  /**
-   * Get current band index
+   * Get band index
    * @return {number} Band index
    */
   getBandIndex() {
@@ -515,15 +439,14 @@ class ZarrTile extends DataTile {
    * @param {number} index Band index
    */
   setBandIndex(index) {
-    if (index !== this.bandIndex_ && index >= 0 && index < this.bandIndices_.length) {
+    if (index !== this.bandIndex_) {
       this.bandIndex_ = index;
-      this.set('bands', this.bandIndices_);
       this.refresh();
     }
   }
 
   /**
-   * Get current time index
+   * Get time index
    * @return {number} Time index
    */
   getTimeIndex() {
@@ -535,54 +458,18 @@ class ZarrTile extends DataTile {
    * @param {number} index Time index
    */
   setTimeIndex(index) {
-    if (index !== this.currentTimeIndex_ && index >= 0 && index < this.timestamps_.length) {
+    if (index !== this.currentTimeIndex_) {
       this.currentTimeIndex_ = index;
-      this.set('time', this.timestamps_[this.currentTimeIndex_]);
-      this.refresh();
+
     }
   }
 
   /**
-   * Set current time by Date object
-   * @param {Date} time Date object
+   * Get metadata
+   * @return {Object} Metadata
    */
-  setCurrentTime(time) {
-    const index = this._findClosestTimestampIndex(time);
-    this.setTimeIndex(index);
-  }
-
-  /**
-   * Get all timestamps
-   * @return {Array<Date>} Array of timestamps
-   */
-  getTimestamps() {
-    return this.timestamps_;
-  }
-
-  /**
-   * Get timestamp at specific index
-   * @param {number} index Time index
-   * @return {Date|null} Date object or null
-   */
-  getTimeAtIndex(index) {
-    return this.timestamps_[index] || null;
-  }
-
-  /**
-   * Get index for specific time
-   * @param {Date} time Date object
-   * @return {number} Time index
-   */
-  getIndexAtTime(time) {
-    return this._findClosestTimestampIndex(time);
-  }
-
-  /**
-   * Get current time index
-   * @return {number} Current time index
-   */
-  getCurrentTimeIndex() {
-    return this.currentTimeIndex_;
+  getMetadata() {
+    return this.metadata_;
   }
 }
 
