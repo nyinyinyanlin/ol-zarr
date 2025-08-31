@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "ZarrTile (ol-zarr): An OpenLayers extension for visualizing Zarr datacubes"
+version: 0.1.0
+doi: 10.5281/zenodo.17013896
+date-released: 2025-08-31
+authors:
+  - family-names: "Lin"
+    given-names: "Nyi Nyi Nyan"
+    affiliation: "Department of Geoinformatics – Z_GIS, University of Salzburg"
+    orcid: "https://orcid.org/0009-0003-3361-5394"
+repository-code: "https://github.com/nyinyinyanlin/ol-zarr"
+license: "MIT"
+keywords:
+  - Zarr
+  - OpenLayers
+  - WebGL
+  - Datacubes
+  - Earth Observation
