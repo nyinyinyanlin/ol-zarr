@@ -1,4 +1,5 @@
 # ZarrTile (ol-zarr)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17013896.svg)](https://doi.org/10.5281/zenodo.17013896)
 
 **ZarrTile (ol-zarr)** is an [OpenLayers](https://openlayers.org/) extension for visualizing large time-series datacubes stored in [Zarr](https://zarr.dev/) format.
 It provides a fully web-native framework for interactive, multi-resolution rendering of 4D datacubes (`[time, band, y, x]`) directly in the browser, powered by WebGL acceleration and a dedicated Web Worker pipeline.
