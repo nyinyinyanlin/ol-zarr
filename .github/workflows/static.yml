@@ -1,0 +1,36 @@
+name: Deploy Demo to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main  # or your default branch
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Copy demo and source
+        run: |
+          mkdir public
+          cp -r examples/* public/
+          cp -r src public/src
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
