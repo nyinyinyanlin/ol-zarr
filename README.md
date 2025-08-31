@@ -1,295 +1,223 @@
-# ol-zarr
+# ZarrTile (ol-zarr)
 
-![npm version](https://img.shields.io/npm/v/ol-zarr.svg)
-![npm downloads](https://img.shields.io/npm/dm/ol-zarr.svg)
-![license](https://img.shields.io/npm/l/ol-zarr.svg)
+**ZarrTile (ol-zarr)** is an [OpenLayers](https://openlayers.org/) extension for visualizing large time-series datacubes stored in [Zarr](https://zarr.dev/) format.
+It provides a fully web-native framework for interactive, multi-resolution rendering of 4D datacubes (`[time, band, y, x]`) directly in the browser, powered by WebGL acceleration and a dedicated Web Worker pipeline.
 
-OpenLayers extension for visualizing Zarr-based geospatial data as map tiles with WebGL acceleration.
-
-## ✨ Features
-
-- 🚀 **Self-contained**: Bundles all dependencies for maximum reliability
-- 🌍 **WebGL accelerated**: High-performance tile rendering
-- 📊 **Multi-dimensional**: Support for temporal and multi-band data
-- ⏱️ **Temporal navigation**: Built-in time series support
-- 🎯 **Easy integration**: Drop-in replacement for standard tile sources
-- 🔧 **Flexible**: Configurable data normalization and statistics
-
-## 📦 Installation
-
-### NPM
-```bash
-npm install ol-zarr ol
-```
-
-### Yarn
-```bash
-yarn add ol-zarr ol
-```
-
-### CDN (UMD)
-```html
-<script src="https://unpkg.com/ol@10/dist/ol.js"></script>
-<script src="https://unpkg.com/ol-zarr/dist/index.umd.js"></script>
-```
-
-## 🚀 Quick Start
-
-### ES Modules
-```javascript
-import { ZarrTile } from 'ol-zarr';
-import { Map, View } from 'ol';
-import { WebGLTile } from 'ol/layer';
-
-const source = new ZarrTile({
-  metadata: {
-    url: 'https://example.com/zarr-data',
-    path: 'temperature',
-    extent: [-180, -90, 180, 90],
-    crs: 'EPSG:4326',
-    zoomLevels: [0, 1, 2, 3, 4],
-    resolutions: [180, 90, 45, 22.5, 11.25]
-  }
-});
-
-const layer = new WebGLTile({ source });
-
-const map = new Map({
-  target: 'map',
-  layers: [layer],
-  view: new View({
-    center: [0, 0],
-    zoom: 2
-  })
-});
-```
-
-### CDN Usage
-```html
-<!DOCTYPE html>
-<html>
-<head>
-  <link rel="stylesheet" href="https://unpkg.com/ol@10/ol.css">
-</head>
-<body>
-  <div id="map" style="width: 100%; height: 400px;"></div>
-  
-  <script src="https://unpkg.com/ol@10/dist/ol.js"></script>
-  <script src="https://unpkg.com/ol-zarr/dist/index.umd.js"></script>
-  
-  <script>
-    const source = new olZarr.ZarrTile({
-      metadata: {
-        url: 'https://example.com/zarr-data',
-        path: 'temperature',
-        extent: [-180, -90, 180, 90],
-        crs: 'EPSG:4326',
-        zoomLevels: [0, 1, 2, 3],
-        resolutions: [180, 90, 45, 22.5]
-      }
-    });
-
-    const map = new ol.Map({
-      target: 'map',
-      layers: [new ol.layer.WebGLTile({ source })],
-      view: new ol.View({ center: [0, 0], zoom: 2 })
-    });
-  </script>
-</body>
-</html>
-```
-
-## 📊 Working with Temporal Data
-
-```javascript
-const source = new ZarrTile({
-  metadata: {
-    url: 'https://example.com/temporal-data',
-    path: 'lst_time_series',
-    extent: [-180, -90, 180, 90],
-    crs: 'EPSG:4326',
-    zoomLevels: [0, 1, 2, 3],
-    resolutions: [180, 90, 45, 22.5],
-    // Optional: pre-loaded timestamps
-    timestamps: [
-      new Date('2024-01-01'),
-      new Date('2024-01-02'),
-      new Date('2024-01-03')
-    ]
-  }
-});
-
-// Load timestamps dynamically from Zarr store
-await source.retrieveTimestamps();
-
-// Navigate through time
-source.setTimeIndex(0);  // First timestamp
-source.setCurrentTime(new Date('2024-01-02'));  // Specific date
-
-// Listen for time changes
-source.addChangeListener('time', () => {
-  console.log('Current time:', source.getTimeAtIndex(source.getTimeIndex()));
-});
-```
-
-## 🎛️ Multi-band Data
-
-```javascript
-const source = new ZarrTile({
-  metadata: {
-    url: 'https://example.com/multispectral',
-    path: 'sentinel2',
-    extent: [1000000, 6000000, 1500000, 6500000],
-    crs: 'EPSG:3857',
-    zoomLevels: [8, 9, 10, 11, 12],
-    resolutions: [305.7, 152.9, 76.4, 38.2, 19.1],
-    bandIndices: [0, 1, 2, 3], // Red, Green, Blue, NIR
-    nodata: -9999
-  }
-});
-
-// Switch between bands
-source.setBandIndex(0);  // Red band
-source.setBandIndex(3);  // NIR band
-
-// Get coordinate information
-const indices = source.getIndicesFromCoord([1250000, 6250000]);
-const coords = source.getCoordinateAtIndex(500, 300);
-```
-
-## 🔧 Configuration Options
-
-### Required Metadata
-```javascript
-{
-  url: "string",           // Zarr store base URL
-  path: "string",          // Dataset path within store  
-  extent: [number],        // [xmin, ymin, xmax, ymax]
-  crs: "string",           // Coordinate reference system
-  zoomLevels: [number],    // Supported zoom levels
-  resolutions: [number]    // Resolution per zoom level
-}
-```
-
-### Optional Metadata
-```javascript
-{
-  bandIndices: [number],      // Band indices to use (default: [0])
-  nodata: number|"nan",       // NODATA value (default: undefined)
-  normalize: boolean,         // Apply normalization (default: false)
-  usePercentiles: boolean,    // Use p2/p98 vs min/max (default: true)
-  timestamps: [Date],         // Pre-loaded timestamps
-  statistics: [Object],       // Pre-computed statistics
-  arrayPaths: {               // Custom Zarr array paths
-    value: "string",          // Value array path (default: "value")
-    time: "string",           // Time array path (default: "time") 
-    statistics: "string"      // Statistics path (default: "statistics")
-  }
-}
-```
-
-### Constructor Options
-```javascript
-{
-  metadata: Object,          // Required metadata (above)
-  bandIndex: number,         // Initial band index (default: 0)
-  timeIndex: number,         // Initial time index (default: 0)
-  interpolate: boolean,      // Use interpolation (default: true)
-  transition: number,        // Fade duration in ms (default: 0)
-  wrapX: boolean            // Wrap around antimeridian (default: false)
-}
-```
-
-## 📖 API Reference
-
-### Core Methods
-- `getMetadata()` - Get source metadata
-- `getBandIndex()` / `setBandIndex(index)` - Band control
-- `getTimeIndex()` / `setTimeIndex(index)` - Time control
-- `setCurrentTime(date)` - Set time by Date object
-
-### Temporal Methods
-- `getTimestamps()` - Get all available timestamps
-- `retrieveTimestamps()` - Load timestamps from Zarr store
-- `getCurrentStatistics()` - Get statistics for current time
-- `retrieveStatistics()` - Load statistics from Zarr store
-- `getTimeRangeIndices(start, end)` - Get index range for date range
-
-### Coordinate Utilities
-- `getIndicesFromCoord([x, y])` - Map coordinates to array indices
-- `getCoordinateAtIndex(x, y)` - Array indices to map coordinates
-- `getIndicesFromExtent([xmin, ymin, xmax, ymax])` - Extent to indices
-- `getExtentFromIndices(x0, y0, x1, y1)` - Indices to extent
-
-## 📁 Data Preparation
-
-### Required Zarr Structure
-```
-/{path}/
-├── {zoom_level}/              # One folder per zoom level
-│   ├── value/                 # Main data [time, band, y, x] or [band, y, x]
-│   ├── time/                  # Time coordinates (temporal data only)
-│   ├── statistics/            # Statistics [time, band, stats] or [band, stats]
-│   ├── x/                     # X coordinates
-│   └── y/                     # Y coordinates
-```
-
-### Python Data Preparation
-We provide Python scripts to convert your geospatial data into ol-zarr compatible format:
-
-```python
-# Example using our data preparation tools
-python prepare_zarr_data.py \
-  --input satellite_images/ \
-  --output zarr_output/ \
-  --zoom-levels 0,1,2,3,4 \
-  --chunk-size 256
-```
-
-See [docs/data-preparation.md](docs/data-preparation.md) for detailed instructions.
-
-## 🏗️ Bundle Information
-
-ol-zarr includes a self-contained worker (~515 KiB) that bundles the Zarr JavaScript library. This design choice ensures:
-
-- ✅ **Reliability**: Works offline and in restricted networks
-- ✅ **Consistency**: Same Zarr version across all environments  
-- ✅ **Simplicity**: Zero configuration required
-- ✅ **Compatibility**: No CDN dependencies or version conflicts
-
-## 🌟 Examples
-
-- [Basic Usage](examples/basic.html) - Simple static data visualization
-- [Temporal Data](examples/temporal.html) - Time series navigation
-- [Multi-band](examples/multi-band.html) - Band switching and analysis
-- [Statistics](examples/statistics.html) - Dynamic data statistics
-
-## 🤝 Contributing
-
-Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- [OpenLayers](https://openlayers.org/) - Web mapping library
-- [Zarr](https://zarr.readthedocs.io/) - Chunked, compressed array storage
-- [Zarr JavaScript](https://github.com/gzuidhof/zarr.js/) - JavaScript implementation
-
-## 📞 Support
-
-- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/nyinyinyanlin/ol-zarr/issues)
-- 💬 **Discussions**: [GitHub Discussions](https://github.com/nyinyinyanlin/ol-zarr/discussions)
-- 📧 **Email**: [nyinyinyan.lin@plus.ac.at]
+This package is designed to be general-purpose: you define the rendering styles, visual encodings, and colormaps as required for your application.
 
 ---
 
-Made with ❤️ for the geospatial community
+## ✨ Features
+
+* **Native Zarr pyramid support**: load multi-resolution datasets efficiently
+* **Time navigation**: step through temporal slices with API methods or UI controls
+* **Multi-band composites**: render single-band or multi-band data (e.g. RGB)
+* **Flexible rendering modes**:
+
+  * `raw` → float32 values for analytical use
+  * `display` → Uint8Clamped arrays for visualization
+* **NODATA handling**: configurable strategies for transparency or replacement values
+* **Statistics-based normalization**: min, max, percentiles, standard deviation, etc.
+* **Web Worker integration**: responsive rendering and non-blocking tile loading
+* **Configurable pipeline**: all rendering logic and styling expressions are defined by the user
+
+---
+
+## 📂 Repository Structure
+
+```
+src/
+  ZarrTile.js       # Main OpenLayers DataTile source extension
+  zarr.worker.js    # Web Worker for async tile retrieval & preprocessing
+examples/
+  demo.html         # Example usage with dataset switcher and UI controls
+```
+
+---
+
+## 📦 Dataset Structure
+
+ZarrTile expects Zarr stores organized as **multi-resolution pyramids**:
+
+```
+datacube.zarr/
+├── .zattrs
+├── time/                # [T] timestamps
+├── statistics/          # [T, B, S] statistics arrays
+├── 6/value/             # [T, B, H, W] lowest zoom
+├── ...
+└── 15/value/            # [T, B, H, W] highest zoom
+```
+
+* **Value arrays**: `[time, band, y, x]`
+* **Time arrays**: `[time]` (ISO strings or epoch integers)
+* **Statistics arrays**: `[time, band, stat]` (min, max, mean, std, percentiles, etc.)
+* **Metadata (`.zattrs`)** should include:
+
+  * Coordinate Reference System (CRS)
+  * Spatial extent
+  * Resolutions and zoom levels
+  * Band names
+  * NODATA values
+
+---
+
+## ⚙️ Configuration Reference
+
+### Core
+
+```js
+url: "https://server/datacube.zarr"   // Zarr store URL
+path: "variable"                      // group inside store
+```
+
+### Spatial
+
+```js
+extent: [xmin, ymin, xmax, ymax]
+crs: "EPSG:xxxx"
+zoomLevels: [6,7,...,15]
+resolutions: [640, 320, ..., 1.25]
+```
+
+### Data Selection
+
+```js
+bands: [0]       // single band
+bands: [2,1,0]   // multi-band composite
+```
+
+### NODATA Handling
+
+```js
+mask_nodata: true
+nodata_strategy: "replace"       // or "normalize_clamp"
+nodata_replace_value: 0
+```
+
+### Normalization & Statistics
+
+```js
+normalize: {
+  min_key: "p2",
+  max_key: "p98",
+  strategy: "global_band_per_time"
+}
+
+statistics_key_indices: { min:0, max:1, mean:2, p2:3, p98:4, std:5 }
+```
+
+### Render Modes
+
+```js
+render_type: "raw"      // float32 output
+render_type: "display"  // Uint8Clamped output
+
+drc: { strategy: "std_stretch", slope: 2.0 } // optional display adjustment
+```
+
+---
+
+## 🔄 Data Flow Architecture
+
+1. **Initialization**
+   Metadata is loaded, extent and resolution are parsed, and a `ZarrTile` instance is created.
+
+2. **Tile request**
+   OpenLayers requests a tile → ZarrTile resolves parameters → Worker fetches array chunk → preprocessing applied → processed tile returned.
+
+3. **State change**
+   Time index or band selection updated → cache invalidated → tiles re-requested.
+
+4. **Worker communication**
+   Main thread sends configuration/state → Worker returns arrays as transferable data.
+
+---
+
+## 💻 Usage Examples
+
+### Single-band analytical layer
+
+```js
+import ZarrTile from './src/ZarrTile.js';
+import WebGLTile from 'ol/layer/WebGLTile.js';
+
+const source = await ZarrTile.create({
+  url: 'https://example.com/datacube.zarr',
+  path: 'variable',
+  bands: [0],
+  mask_nodata: true,
+  render_type: 'raw',
+  normalize: { min_key: 'min', max_key: 'max', strategy: 'global_band_per_time' },
+  statistics_key_indices: { min:0, max:1, mean:2, std:3 }
+});
+
+const layer = new WebGLTile({ source, style: customStyleExpression });
+map.addLayer(layer);
+```
+
+### Multi-band composite
+
+```js
+const source = await ZarrTile.create({
+  url: 'https://example.com/datacube.zarr',
+  path: 'reflectance',
+  bands: [2,1,0],    // RGB composite
+  render_type: 'display'
+});
+
+const layer = new WebGLTile({ source, style: compositeStyle });
+```
+
+---
+
+## ⏱️ Time Navigation
+
+ZarrTile provides a temporal API:
+
+* `.nextTimestep()` / `.previousTimestep()`
+* `.setCurrentTimeIndex(index)`
+* `.setCurrentTimestamp(timestamp)` (snaps to nearest available)
+* `.getTimestamps()` returns full list of timesteps
+
+---
+
+## 🛠 Implementation Patterns
+
+* **Configuration precedence**: user input > metadata > defaults
+* **State caching**: recompute only on change
+* **Worker messaging**: keep communication lightweight
+* **Multi-format support**: timestamps can be ISO strings, epoch values, etc.
+
+---
+
+## ✅ Best Practices
+
+* Use chunk sizes aligned with tile size (e.g. `[1, 1, 256, 256]`)
+* Provide per-time statistics for robust normalization
+* Reserve a sentinel value (e.g., `255`) for NODATA in categorical datasets
+* Ensure consistent extent and resolution across all bands
+* Always enable `mask_nodata` for transparent backgrounds
+
+---
+
+## ❗ Troubleshooting
+
+* **Extent missing** → must be supplied via config if not in `.zattrs`
+* **Zoom/resolution mismatch** → arrays must match zoom level count
+* **Statistics errors** → verify keys against `statistics_key_indices`
+* **Shape errors** → arrays must be 4D `[time, band, y, x]`
+
+---
+
+## 📜 License
+
+This project is licensed under the MIT License.
+See the [LICENSE](./LICENSE) file for details.
+
+---
+
+## 🙌 Credits
+
+Developed at [Z\_GIS – University of Salzburg](https://zgis.at) within the **SpongeCity Toolbox** project.
+Based on datacube research and implementations by the Spatial Services and EO Analytics teams.
