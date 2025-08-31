@@ -23,7 +23,7 @@ jobs:
       - name: Copy demo and source
         run: |
           mkdir public
-          cp -r examples/* public/
+          cp -r example/* public/
           cp -r src public/src
 
       - name: Upload artifact
