@@ -1,0 +1,560 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ZarrTile DEMO — Greenness & Appearance (color33)</title>
+    <link rel="stylesheet" href="https://unpkg.com/ol@10.6.0/ol.css">
+    <style>
+        html,
+        body {
+            height: 100%;
+            margin: 0;
+            font-family: Arial, sans-serif;
+        }
+
+        #map {
+            height: 100%;
+            width: 100%;
+        }
+
+        .controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            min-width: 320px;
+        }
+
+        .control-group {
+            margin-bottom: 12px;
+        }
+
+        .control-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .control-group label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: bold;
+            font-size: 12px;
+        }
+
+        .row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .row>* {
+            flex: 1;
+        }
+
+        .value-display {
+            font-size: 11px;
+            color: #666;
+        }
+
+        .time-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .time-controls button {
+            padding: 5px 10px;
+            border: 1px solid #ccc;
+            background: white;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+
+        .time-controls button:hover {
+            background: #f0f0f0;
+        }
+
+        .time-controls button:disabled {
+            opacity: .5;
+            cursor: not-allowed;
+        }
+
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, .8);
+            color: #fff;
+            padding: 18px 22px;
+            border-radius: 6px;
+            z-index: 2000;
+        }
+
+        .error {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(255, 0, 0, .92);
+            color: #fff;
+            padding: 10px 12px;
+            border-radius: 6px;
+            z-index: 2000;
+            max-width: 440px;
+        }
+
+        .info {
+            font-size: 11px;
+            color: #666;
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #eee;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .legend {
+            margin-top: 8px;
+            max-height: 260px;
+            overflow: auto;
+            padding-right: 6px;
+        }
+
+        .legend-item {
+            display: grid;
+            grid-template-columns: 18px 1fr;
+            gap: 8px;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+
+        .swatch {
+            width: 18px;
+            height: 18px;
+            border: 1px solid #aaa;
+            border-radius: 2px;
+        }
+
+        .legend-title {
+            font-weight: bold;
+            margin-bottom: 6px;
+        }
+    </style>
+
+    <script type="importmap">
+  {
+    "imports": {
+      "ol/": "https://unpkg.com/ol@10.6.0/",
+      "rbush": "https://cdn.jsdelivr.net/npm/rbush@4.0.1/+esm"
+    }
+  }
+  </script>
+</head>
+
+<body>
+    <div id="loading" class="loading">Loading ZarrTile dataset...</div>
+    <div id="error" class="error" style="display:none;"></div>
+
+    <div id="map"></div>
+
+    <div class="controls">
+        <div class="control-group">
+            <label for="dataset">Dataset</label>
+            <select id="dataset">
+                <option value="greenness" selected>Greenness</option>
+                <option value="appearance">Land-surface appearance categories (color33)</option>
+            </select>
+        </div>
+
+        <div class="control-group" id="normalizeGroup">
+            <label for="normStrategy">Normalize strategy (Greenness)</label>
+            <select id="normStrategy">
+                <option value="minmax" selected>min / max</option>
+                <option value="p2p98">p2 / p98</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label>
+                <input type="checkbox" id="layerVisible" checked>
+                Show Layer
+            </label>
+        </div>
+
+        <div class="control-group">
+            <label for="opacity">Opacity</label>
+            <div class="row">
+                <input type="range" id="opacity" min="0" max="1" step="0.1" value="1.0">
+                <div class="value-display" id="opacityValue">100%</div>
+            </div>
+        </div>
+
+        <div class="control-group">
+            <label>Time Navigation</label>
+            <div class="time-controls">
+                <button id="prevTime" title="Previous timestep">←</button>
+                <span id="timeDisplay">Time: 0/0</span>
+                <button id="nextTime" title="Next timestep">→</button>
+            </div>
+            <input type="range" id="timeSlider" min="0" max="0" step="1" value="0">
+        </div>
+
+        <div class="info">
+            <div>Projection: EPSG:32633</div>
+            <div>Render: <span id="renderInfo">-</span></div>
+
+            <div id="appearanceLegendContainer" class="hidden">
+                <div class="legend-title">Appearance (color33)</div>
+                <div id="appearanceLegend" class="legend"></div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import Map from 'ol/Map.js';
+        import View from 'ol/View.js';
+        import WebGLTile from 'ol/layer/WebGLTile.js';
+        import TileLayer from 'ol/layer/Tile.js';
+        import TileArcGISRest from 'ol/source/TileArcGISRest';
+        import { get as getProjection } from 'ol/proj.js';
+        import ZarrTile from './src/ZarrTile.js';
+
+        // --- Config ---
+        const CONFIG = {
+            url: 'https://spongecity.zgis.at/minio/spongecity/datacubes/HRV/Koprivnica/datacube/color33',
+            crs: 'EPSG:32633',
+            center: [632200.0, 5102790.0],
+            zoom: 10
+        };
+
+        // color33 (appearance) categories
+        const APPEARANCE_CATEGORIES = [
+            { value: 0, color: [0, 0, 0], label: 'Unclassified' },
+            { value: 1, color: [30, 250, 30], label: 'Strong Vegetation with High NIR' },
+            { value: 2, color: [20, 175, 20], label: 'Strong Vegetation with Low NIR' },
+            { value: 3, color: [0, 220, 90], label: 'Average Vegetation with High NIR' },
+            { value: 4, color: [0, 170, 110], label: 'Average Vegetation with Low NIR' },
+            { value: 5, color: [175, 250, 140], label: 'Weak Vegetation' },
+            { value: 6, color: [100, 120, 80], label: 'Vegetation in Shadow/Water/Turbid water/Shadow' },
+            { value: 7, color: [190, 250, 160], label: 'Shrub Rangeland with High NIR' },
+            { value: 8, color: [140, 170, 110], label: 'Shrub Rangeland with Low NIR' },
+            { value: 9, color: [225, 250, 50], label: 'Herbaceous Rangeland' },
+            { value: 10, color: [200, 200, 100], label: 'Weak Rangeland' },
+            { value: 11, color: [100, 130, 120], label: 'Peat or Bog' },
+            { value: 12, color: [175, 255, 255], label: 'Greenhouse' },
+            { value: 13, color: [255, 170, 110], label: 'Very Bright Bare soil or Built-up' },
+            { value: 14, color: [230, 155, 95], label: 'Bright Bare soil or Built-up' },
+            { value: 15, color: [210, 140, 100], label: 'Strong Bare soil or Built-up' },
+            { value: 16, color: [180, 100, 70], label: 'Average Bare soil or Built-up' },
+            { value: 17, color: [140, 60, 50], label: 'Dark Bare soil or Built-up' },
+            { value: 18, color: [230, 130, 60], label: 'Weak Bare soil or Built-up' },
+            { value: 19, color: [190, 190, 220], label: 'Near InfraRed-Peaked Bare soil or Built-up' },
+            { value: 20, color: [130, 50, 80], label: 'Burned area' },
+            { value: 21, color: [0, 0, 80], label: 'Deep Water or Shadow' },
+            { value: 22, color: [0, 40, 110], label: 'Shallow Water or Shadow' },
+            { value: 23, color: [70, 100, 130], label: 'Turbid Water or Shadow' },
+            { value: 24, color: [110, 0, 150], label: 'Salty Shallow Water' },
+            { value: 25, color: [230, 230, 230], label: 'Cloud' },
+            { value: 26, color: [90, 70, 110], label: 'Smoke Plume' },
+            { value: 27, color: [200, 225, 175], label: 'Thin Cloud over Vegetation' },
+            { value: 28, color: [190, 190, 245], label: 'Thin Cloud over Water or Bare soil' },
+            { value: 29, color: [30, 255, 255], label: 'Snow or Water Ice' },
+            { value: 30, color: [0, 100, 140], label: 'Snow in Shadow' },
+            { value: 31, color: [20, 20, 60], label: 'Shadow areas' },
+            { value: 32, color: [255, 20, 70], label: 'Flame, Active Fire' },
+            { value: 33, color: [255, 0, 0], label: 'Unknown' }
+        ];
+
+        // --- UI elements ---
+        const loadingEl = document.getElementById('loading');
+        const errorEl = document.getElementById('error');
+        const datasetEl = document.getElementById('dataset');
+        const normStrategyEl = document.getElementById('normStrategy');
+        const normalizeGroupEl = document.getElementById('normalizeGroup');
+        const layerVisibleEl = document.getElementById('layerVisible');
+        const opacityEl = document.getElementById('opacity');
+        const opacityValueEl = document.getElementById('opacityValue');
+        const prevTimeEl = document.getElementById('prevTime');
+        const nextTimeEl = document.getElementById('nextTime');
+        const timeDisplayEl = document.getElementById('timeDisplay');
+        const timeSliderEl = document.getElementById('timeSlider');
+        const renderInfoEl = document.getElementById('renderInfo');
+        const appearanceLegendContainerEl = document.getElementById('appearanceLegendContainer');
+        const appearanceLegendEl = document.getElementById('appearanceLegend');
+
+        // --- Map / layer state ---
+        let map, zarrLayer, zarrSource;
+
+        // Track the last chosen timestamp so we can restore it after rebuild
+        let lastTimestamp = null;
+
+        function initMap() {
+            const projection = getProjection(CONFIG.crs);
+            map = new Map({
+                target: 'map',
+                layers: [
+                    new TileLayer({
+                        source: new TileArcGISRest({
+                            url: "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer",
+                            maxZoom: 19,
+                            attributions: 'Imagery © ESRI'
+                        })
+                    })
+                ],
+                view: new View({ center: CONFIG.center, zoom: CONFIG.zoom, projection })
+            });
+        }
+
+        // --- Styles ---
+        // Greenness: white→green gradient, with alpha from band 2 (0..1) for NODATA transparency
+        function greennessStyle() {
+            const val = ['clamp', ['band', 1], 0, 1];
+            return {
+                color: [
+                    'case',
+                    ['==', ['band', 2], -9999], ['color', 0, 0, 0, 0], // NODATA transparent
+
+                    // Otherwise use greenness gradient with full opacity
+                    ['interpolate', ['linear'], val,
+                        0.0, ['color', 247, 252, 245, 1],
+                        0.125, ['color', 229, 245, 224, 1],
+                        0.25, ['color', 199, 233, 192, 1],
+                        0.375, ['color', 161, 217, 155, 1],
+                        0.5, ['color', 116, 196, 118, 1],
+                        0.625, ['color', 65, 171, 93, 1],
+                        0.75, ['color', 35, 139, 69, 1],
+                        0.875, ['color', 0, 109, 44, 1],
+                        1.0, ['color', 0, 68, 27, 1]
+                    ]
+                ]
+            };
+        }
+
+        // Appearance: case-expression, value 255 => transparent; others opaque (alpha=1)
+        function appearanceStyleCase(categories) {
+            const clsExpr = ['round', ['*', ['band', 1], 255]];
+            const caseArgs = ['case'];
+            // NODATA 255 → transparent
+            caseArgs.push(['==', clsExpr, 255], ['color', 0, 0, 0, 0]);
+            // Valid categories → full opacity
+            for (const { value, color } of categories) {
+                caseArgs.push(['==', clsExpr, value], ['color', color[0], color[1], color[2], 1]);
+            }
+            // default → transparent
+            caseArgs.push(['color', 0, 0, 0, 0]);
+            return { color: caseArgs };
+        }
+
+        // --- Helpers ---
+        function showError(message) {
+            errorEl.textContent = message;
+            errorEl.style.display = 'block';
+            loadingEl.style.display = 'none';
+        }
+        function clearError() {
+            errorEl.style.display = 'none';
+            errorEl.textContent = '';
+        }
+        function updateTimeControls() {
+            if (!zarrSource) return;
+            const timestamps = zarrSource.getTimestamps();
+            const currentIndex = zarrSource.getCurrentTimeIndex();
+            timeDisplayEl.textContent = `Time: ${timestamps.length ? (currentIndex + 1) : 0}/${timestamps.length}`;
+            timeSliderEl.max = Math.max(0, timestamps.length - 1);
+            timeSliderEl.value = currentIndex;
+            prevTimeEl.disabled = currentIndex <= 0;
+            nextTimeEl.disabled = currentIndex >= timestamps.length - 1;
+        }
+        function setUIForDataset(ds) {
+            const isGreenness = ds === 'greenness';
+            normalizeGroupEl.classList.toggle('hidden', !isGreenness);
+            appearanceLegendContainerEl.classList.toggle('hidden', isGreenness);
+        }
+        function buildAppearanceLegend() {
+            appearanceLegendEl.innerHTML = '';
+            for (const { value, color, label } of APPEARANCE_CATEGORIES) {
+                const row = document.createElement('div');
+                row.className = 'legend-item';
+                const swatch = document.createElement('div');
+                swatch.className = 'swatch';
+                swatch.style.background = `rgb(${color[0]},${color[1]},${color[2]})`;
+                const text = document.createElement('div');
+                text.textContent = `${value}: ${label}`;
+                row.appendChild(swatch);
+                row.appendChild(text);
+                appearanceLegendEl.appendChild(row);
+            }
+            // Optional: add an entry for 255=NODATA (transparent) in legend if you want it visible
+            // const nodataRow = document.createElement('div');
+            // nodataRow.className = 'legend-item';
+            // const sw = document.createElement('div'); sw.className = 'swatch'; sw.style.background = 'transparent'; sw.style.borderStyle='dashed';
+            // const tx = document.createElement('div'); tx.textContent = '255: NODATA (transparent)';
+            // nodataRow.appendChild(sw); nodataRow.appendChild(tx); appearanceLegendEl.appendChild(nodataRow);
+        }
+
+        // Keep/restore timestamp when we rebuild the source
+        function captureCurrentTimestamp() {
+            if (!zarrSource) return null;
+            if (typeof zarrSource.getCurrentTimestamp === 'function') {
+                return zarrSource.getCurrentTimestamp();
+            }
+            const ts = zarrSource.getTimestamps?.() || [];
+            const idx = zarrSource.getCurrentTimeIndex?.();
+            return (ts && ts.length && Number.isInteger(idx)) ? ts[idx] : null;
+        }
+
+        // Build ZarrTile source config from UI state
+        function buildSourceConfig() {
+            const ds = datasetEl.value;
+            const isGreenness = ds === 'greenness';
+
+            const base = {
+                url: CONFIG.url,
+                path: isGreenness ? 'greenness' : 'appearance',
+                bands: [0],
+                mask_nodata: isGreenness,      // greenness: enable masking
+                interpolate: false,
+                verbose: false
+            };
+
+            if (isGreenness) {
+                base.render_type = 'raw';
+                const strat = normStrategyEl.value;
+                const [min_key, max_key] = strat === 'p2p98' ? ['p2', 'p98'] : ['min', 'max'];
+                base.normalize = { min_key, max_key, strategy: 'per_band_per_time' };
+                base.drc = { strategy: 'std_stretch' };
+                base.statistics_key_indices = { min: 0, max: 1, mean: 2, p2: 3, p98: 4, mode: 5, std: 6 };
+            } else {
+                base.render_type = 'display';  // categorical: no normalization
+                base.normalize = null;
+                base.drc = null;
+            }
+
+            return base;
+        }
+
+        async function rebuildLayer() {
+            loadingEl.style.display = 'block';
+            clearError();
+
+            try {
+                // capture current timestamp before teardown
+                lastTimestamp = captureCurrentTimestamp();
+
+                if (zarrLayer) {
+                    map.removeLayer(zarrLayer);
+                    zarrLayer = null;
+                    zarrSource = null;
+                }
+
+                const cfg = buildSourceConfig();
+                zarrSource = await ZarrTile.create(cfg);
+
+                const ds = datasetEl.value;
+                const style = ds === 'greenness' ? greennessStyle() : appearanceStyleCase(APPEARANCE_CATEGORIES);
+
+                zarrLayer = new WebGLTile({
+                    source: zarrSource,
+                    style,
+                    opacity: parseFloat(opacityEl.value)
+                });
+
+                map.addLayer(zarrLayer);
+                const rc = zarrSource.getRenderConfiguration?.();
+                if (rc) renderInfoEl.textContent = `${rc.renderType} mode`;
+
+                // restore timestamp using ZarrTile's built-in snapping
+                if (lastTimestamp && typeof zarrSource.setCurrentTimestamp === 'function') {
+                    zarrSource.setCurrentTimestamp(lastTimestamp);
+                }
+
+                updateTimeControls();
+
+            } catch (err) {
+                showError(`Failed to initialize Zarr layer: ${err.message}`);
+            } finally {
+                loadingEl.style.display = 'none';
+            }
+        }
+
+        // --- Event listeners ---
+        layerVisibleEl.addEventListener('change', (e) => {
+            if (zarrLayer) zarrLayer.setVisible(e.target.checked);
+        });
+        opacityEl.addEventListener('input', (e) => {
+            const opacity = parseFloat(e.target.value);
+            opacityValueEl.textContent = Math.round(opacity * 100) + '%';
+            if (zarrLayer) zarrLayer.setOpacity(opacity);
+        });
+        prevTimeEl.addEventListener('click', () => {
+            if (zarrSource && zarrSource.previousTimestep()) {
+                lastTimestamp = captureCurrentTimestamp();
+                updateTimeControls();
+            }
+        });
+        nextTimeEl.addEventListener('click', () => {
+            if (zarrSource && zarrSource.nextTimestep()) {
+                lastTimestamp = captureCurrentTimestamp();
+                updateTimeControls();
+            }
+        });
+        timeSliderEl.addEventListener('input', (e) => {
+            const timeIndex = parseInt(e.target.value);
+            if (zarrSource) {
+                zarrSource.setCurrentTimeIndex(timeIndex);
+                lastTimestamp = captureCurrentTimestamp();
+                updateTimeControls();
+            }
+        });
+        datasetEl.addEventListener('change', async () => {
+            setUIForDataset(datasetEl.value);
+            if (datasetEl.value === 'appearance') buildAppearanceLegend();
+            await rebuildLayer();
+        });
+        normStrategyEl.addEventListener('change', async () => {
+            if (datasetEl.value === 'greenness') await rebuildLayer();
+        });
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.isContentEditable) return;
+            switch (e.key) {
+                case 'ArrowLeft':
+                    if (zarrSource) zarrSource.previousTimestep();
+                    lastTimestamp = captureCurrentTimestamp();
+                    updateTimeControls();
+                    e.preventDefault();
+                    break;
+                case 'ArrowRight':
+                    if (zarrSource) zarrSource.nextTimestep();
+                    lastTimestamp = captureCurrentTimestamp();
+                    updateTimeControls();
+                    e.preventDefault();
+                    break;
+                case ' ':
+                    layerVisibleEl.checked = !layerVisibleEl.checked;
+                    layerVisibleEl.dispatchEvent(new Event('change'));
+                    e.preventDefault();
+                    break;
+            }
+        });
+
+        // --- Init ---
+        async function init() {
+            initMap();
+            setUIForDataset(datasetEl.value);
+            buildAppearanceLegend(); // prebuild; hidden unless “appearance” selected
+            await rebuildLayer();
+        }
+        init();
+    </script>
+</body>
+
+</html>
